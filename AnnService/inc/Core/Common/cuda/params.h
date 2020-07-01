@@ -36,7 +36,7 @@
 #define SAMPLES 5000 // number of samples used to determine median for TPT construction
 #define KEYTYPE float // Keys used to divide TPTs at each node
 
-#define DEBUG 1
+//#define DEBUG 1
 
 #if defined(DEBUG)
 #define LOG(f_, ...) printf((f_), ##__VA_ARGS__)
