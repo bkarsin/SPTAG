@@ -47,10 +47,9 @@ namespace SPTAG
                                  m_iGPURefineSteps(0),
                                  m_iGPURefineDepth(2),
                                  m_iGPULeafSize(500),
-                                 m_iGPUBatches(1)
-            {
-                m_pNeighborhoodGraph.SetName("Graph");
-            }
+                                 m_iGPUBatches(1),
+                                 m_iGPUNum(0)
+            {}
 
             ~NeighborhoodGraph() {}
 
@@ -106,9 +105,8 @@ namespace SPTAG
                 SizeType initSize;
                 SPTAG::Helper::Convert::ConvertStringTo(index->GetParameter("NumberOfInitialDynamicPivots").c_str(), initSize);
 
-
               // Build the entire RNG graph, both builds the KNN and refines it to RNG
-                buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iGPUBatches);
+                buildGraph<T>(index, m_iGraphSize, m_iNeighborhoodSize, m_iTPTNumber, (int*)m_pNeighborhoodGraph[0], m_iGPURefineSteps, m_iGPURefineDepth, m_iGPUGraphType, m_iGPULeafSize, initSize, m_iGPUBatches, m_iGPUNum);
 
 
               std::unordered_map<SizeType, SizeType>::const_iterator iter;
@@ -448,6 +446,15 @@ namespace SPTAG
                 return m_pNeighborhoodGraph.BufferSize();
             }
 
+            bool LoadGraph(std::istream& input)
+            {
+                if (!m_pNeighborhoodGraph.Load(input)) return false;
+
+                m_iGraphSize = m_pNeighborhoodGraph.R();
+                m_iNeighborhoodSize = m_pNeighborhoodGraph.C();
+                return true;
+            }
+
             bool LoadGraph(std::string sGraphFilename)
             {
                 if (!m_pNeighborhoodGraph.Load(sGraphFilename)) return false;
@@ -513,6 +520,8 @@ namespace SPTAG
 
             inline SizeType R() const { return m_iGraphSize; }
 
+            inline std::string Type() const { return m_pNeighborhoodGraph.Name(); }
+
             static std::shared_ptr<NeighborhoodGraph> CreateInstance(std::string type);
 
         protected:
@@ -523,7 +532,7 @@ namespace SPTAG
         public:
             int m_iTPTNumber, m_iTPTLeafSize, m_iSamples, m_numTopDimensionTPTSplit;
             DimensionType m_iNeighborhoodSize;
-            int m_iNeighborhoodScale, m_iCEFScale, m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps, m_iGPURefineDepth, m_iGPULeafSize, m_iGPUBatches;
+            int m_iNeighborhoodScale, m_iCEFScale, m_iRefineIter, m_iCEF, m_iAddCEF, m_iMaxCheckForRefineGraph, m_iGPUGraphType, m_iGPURefineSteps, m_iGPURefineDepth, m_iGPULeafSize, m_iGPUBatches, m_iGPUNum;
         };
     }
 }
