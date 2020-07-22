@@ -108,16 +108,6 @@ class Point {
   // Computes Cosine dist.  Uses 2 registers to increase pipeline efficiency and ILP
   // Assumes coordinates are normalized so each vector is of unit length.  This lets us
   // perform a dot-product instead of the full cosine distance computation.
-  __device__ SUMTYPE cosine(Point<T,SUMTYPE,Dim>* other, int test) {
-    SUMTYPE total[2]={0,0};
-
-    for(int i=0; i<Dim; i+=2) {
-      total[0] += ((SUMTYPE)((SUMTYPE)coords[i] * (SUMTYPE)other->coords[i]));
-      total[1] += ((SUMTYPE)((SUMTYPE)coords[i+1] * (SUMTYPE)other->coords[i+1]));
-    }
-    printf("dist:%0.3f\n", ((SUMTYPE)1.0 - (total[0]+total[1])));
-    return (SUMTYPE)1.0 - (total[0]+total[1]);
-}
   __device__ SUMTYPE cosine(Point<T,SUMTYPE,Dim>* other) {
     SUMTYPE total[2]={0,0};
 
@@ -179,6 +169,7 @@ class Point<uint8_t, SUMTYPE, Dim> {
     else if(idx % 4 == 3) {
       return (uint8_t)((coords[idx/4])>>24);
     }
+    return 0;
   }
 
 
@@ -236,10 +227,7 @@ class Point<uint8_t, SUMTYPE, Dim> {
     return ((SUMTYPE)65536) - prod;
   }
 
-  __device__ SUMTYPE cosine(Point<uint8_t,SUMTYPE,Dim>* other, int test) {return NULL;}
-
 #else
-  __device__ SUMTYPE cosine(Point<uint8_t,SUMTYPE,Dim>* other, int test) {return NULL;}
   __device__ SUMTYPE cosine(Point<uint8_t,SUMTYPE,Dim>* other) {
     SUMTYPE prod[4];
     SUMTYPE a[4];
@@ -307,6 +295,7 @@ class Point<int8_t, SUMTYPE, Dim> {
     else if(idx % 4 == 3) {
       return (int8_t)((coords[idx/4])>>24);
     }
+    return 0;
   }
 
   __host__ __device__ Point& operator=( const Point& other ) {
@@ -353,64 +342,19 @@ class Point<int8_t, SUMTYPE, Dim> {
     int32_t src=0;
     int32_t target=0;
 
-//    if(id == other->id) return 0;
     for(int i=0; i<Dim/4; ++i) {
       src = coords[i];
       target = other->coords[i];
       prod = __dp4a(src, target, prod);
     }
 
-//    if(prod > 16384) printf("%d\n",prod);
     return ((SUMTYPE)16384) - (SUMTYPE)prod;
   }
 
-  __device__ SUMTYPE cosine(Point<int8_t,SUMTYPE,Dim>* other, int blah) {
-    int32_t prod=0;
-    int32_t src=0;
-    int32_t target=0;
-
-    for(int i=0; i<Dim/4; ++i) {
-      src = coords[i];
-      target = other->coords[i];
-      prod = __dp4a(src, target, prod);
-    }
-    printf("%d\n", ((SUMTYPE)1 - prod));
-
-//    if(prod > 16384) printf("%d\n",prod);
-    return ((SUMTYPE)1) - prod;
-  }
-
-
-/*
- *   __device__ SUMTYPE cosine_unnormalized(Point<int8_t,SUMTYPE,Dim>* other) {
- *     int32_t prod=0;
- *     int32_t src=0;
- *     int32_t target=0;
- *     int32_t manual=0;
- *     for(int i=0; i<Dim/4; ++i) {
- *       src = coords[i];
- *       target = other->coords[i];
- *       prod = __dp4a(src, target, prod);
- *       manual = ((int8_t)(coords[i] & 0x000000FF)*(int8_t)(other->coords[i] & 0x000000FF));
- *       manual += ((int8_t)((coords[i] & 0x0000FF00) >> 8)*(int8_t)((other->coords[i] & 0x0000FF00) >> 8));
- *       manual += ((int8_t)((coords[i] & 0x00FF0000) >> 16)*(int8_t)((other->coords[i] & 0x00FF0000) >> 16));
- *       manual += ((int8_t)((coords[i]) >> 24)*(int8_t)((other->coords[i]) >> 24));
- *       printf("prod:%d, manual:%d\n", prod, manual);
- *     }
- *     return ((SUMTYPE)65536) - prod;
- *   }
- */
-
 #else
-__device__ SUMTYPE cosine(Point<int8_t, SUMTYPE,Dim>* other, int test) {
-return 0;
-}
-
   __device__ SUMTYPE cosine(Point<int8_t,SUMTYPE,Dim>* other) {
     SUMTYPE prod[4];
-    SUMTYPE a[4];
-    SUMTYPE b[4];
-    prod[0]=0; a[0]=0; b[0]=0;
+    prod[0]=0; 
 
     for(int i=0; i<Dim/4; ++i) {
       prod[0] += ((int8_t)(coords[i] & 0x000000FF))*((int8_t)(other->coords[i] & 0x000000FF));
@@ -434,7 +378,6 @@ __host__ Point<T, SUMTYPE, Dim>* convertMatrix(T* data, int rows, int exact_dim)
   Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(rows*sizeof(Point<T,SUMTYPE,Dim>));
   for(int i=0; i<rows; i++) {
     pointArray[i].loadChunk(&data[i*exact_dim], exact_dim);
-//    pointArray[i].load(&data[i*exact_dim]);
   }
   return pointArray;
 } 

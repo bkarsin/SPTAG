@@ -782,43 +782,11 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
 
   SUMTYPE length=0;
 
-  for(int i=0; i<10; i++) {
-    for(int j=0; j<100; j++) {
-      printf("%f,", (float)data[i*100+j]);
-    }
-    cout << endl;
-  }
-  cout << endl;
-
-
   Point<DTYPE,SUMTYPE,MAX_DIM>* points = convertMatrix<DTYPE,SUMTYPE,MAX_DIM>(data, dataSize, dim);
 
   for(int i=0;  i<dataSize; i++) {
     points[i].id = i;
   }
-
-if(typeid(DTYPE) == typeid(int8_t)) {
-  int8_t temp=0;
-  for(int i=0; i<10; i++) {
-    length=0;
-    for(int j=0; j<100; j++) {
-      temp = points[i].getVal(j);
-      printf("%hhd|", temp);
-      length+=points[i].getVal(j)*points[i].getVal(j);
-    }
-    cout << " - " << length << endl;
-  }
-  cout << endl;
-}
-else {
-  for(int i=0; i<10; i++) {
-    for(int j=0; j<100; j++) {
-      cout << points[i].getVal(j) << "|";
-    }
-    cout << endl;
-  }
-  cout << endl;
-}
 
   int batchSize = (dataSize / numBatches);
   if(batchSize * numBatches < dataSize) batchSize++;
