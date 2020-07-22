@@ -34,7 +34,7 @@
 #define THREADS 64 // Number of threads per block
 #define BLOCKS 10240 // Total blocks used
 #define SAMPLES 5000 // number of samples used to determine median for TPT construction
-#define KEYTYPE float // Keys used to divide TPTs at each node
+#define KEYTYPE int // Keys used to divide TPTs at each node
 
 #define DEBUG 1
 

@@ -193,18 +193,30 @@ class TPtree {
      * then compute, for each element, which child node it belongs to (storing in node_ids)
     ************************************************************************************/
     __host__ void construct_tree(Point<T,SUMTYPE,Dim>* points, int min_id, int max_id) {
-
+//int tempIdx1=0;
+//int tempIdx2=0;
       int nodes_on_level=1;
       for(int i=0; i<levels; ++i) {
 
         find_level_sum<T,KEY_T,SUMTYPE,Dim,Dim><<<BLOCKS,THREADS>>>(points, weight_list[i], partition_dims, node_ids, split_keys, node_sizes, N, nodes_on_level);
         cudaDeviceSynchronize();
-
-
+/*
+        for(int i=0; i<nodes_on_level; i++) {
+          printf("%d, ", node_sizes[tempIdx1++]);
+        }
+        printf("\n");
+*/
 
         compute_mean<KEY_T><<<BLOCKS,THREADS>>>(split_keys, node_sizes, num_nodes);
 
         cudaDeviceSynchronize();
+/*
+        for(int i=0; i<nodes_on_level; i++) {
+          printf("%0.2f, ", split_keys[tempIdx2++]);
+        }
+        printf("\n");
+*/
+
 
         update_node_assignments<T,KEY_T,SUMTYPE,Dim,Dim><<<BLOCKS,THREADS>>>(points, weight_list[i], partition_dims, node_ids, split_keys, node_sizes, N);
         cudaDeviceSynchronize();
@@ -282,6 +294,20 @@ __device__ KEY_T weighted_val(Point<uint8_t,SUMTYPE,Dim> point, KEY_T* weights, 
   return val;
 }
 
+template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
+__device__ KEY_T weighted_val(Point<int8_t,SUMTYPE,Dim> point, KEY_T* weights, int* dims) {
+  KEY_T val=0.0;
+  for(int i=0; i<PART_DIMS/4; ++i) {
+    val += (KEY_T)(weights[i*4] * (int8_t)(point.coords[i] & 0x000000FF));
+
+    val += (KEY_T)(weights[i*4+1] *(int8_t)((point.coords[i] & 0x0000FF00) >> 8));
+
+    val += (KEY_T)(weights[i*4+2] *(int8_t)((point.coords[i] & 0x00FF0000) >> 16));
+
+    val += (KEY_T)(weights[i*4+3] *(int8_t)((point.coords[i] & 0xFF000000) >> 24));
+  }
+  return val;
+}
 
 template<typename T, typename KEY_T, typename SUMTYPE, int Dim, int PART_DIMS>
 __global__ void find_level_sum(Point<T,SUMTYPE,Dim>* points, KEY_T* weights, int* partition_dims, int* node_ids, KEY_T* split_keys, int* node_sizes, int N, int nodes_on_level) {

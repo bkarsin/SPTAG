@@ -39,6 +39,7 @@ template<> __forceinline__ __host__ __device__ long long int INFTY<long long int
 template<> __forceinline__ __host__ __device__ float INFTY<float>() {return FLT_MAX;}
 template<> __forceinline__ __host__ __device__ __half INFTY<__half>() {return FLT_MAX;}
 template<> __forceinline__ __host__ __device__ uint8_t INFTY<uint8_t>() {return 255;}
+template<> __forceinline__ __host__ __device__ int8_t INFTY<int8_t>() {return 127;}
 
 /*********************************************************************
 * Object representing a Dim-dimensional point, with each coordinate
@@ -66,6 +67,9 @@ class Point {
     }
   }
 
+  __host__ T getVal(int idx) {
+    return coords[idx];
+  }
 
   __host__ __device__ Point& operator=( const Point& other ) {
     for(int i=0; i<Dim; i++) {
@@ -104,7 +108,16 @@ class Point {
   // Computes Cosine dist.  Uses 2 registers to increase pipeline efficiency and ILP
   // Assumes coordinates are normalized so each vector is of unit length.  This lets us
   // perform a dot-product instead of the full cosine distance computation.
-  __device__ SUMTYPE cosine(Point<T,SUMTYPE,Dim>* other, bool test) {return NULL;}
+  __device__ SUMTYPE cosine(Point<T,SUMTYPE,Dim>* other, int test) {
+    SUMTYPE total[2]={0,0};
+
+    for(int i=0; i<Dim; i+=2) {
+      total[0] += ((SUMTYPE)((SUMTYPE)coords[i] * (SUMTYPE)other->coords[i]));
+      total[1] += ((SUMTYPE)((SUMTYPE)coords[i+1] * (SUMTYPE)other->coords[i+1]));
+    }
+    printf("dist:%0.3f\n", ((SUMTYPE)1.0 - (total[0]+total[1])));
+    return (SUMTYPE)1.0 - (total[0]+total[1]);
+}
   __device__ SUMTYPE cosine(Point<T,SUMTYPE,Dim>* other) {
     SUMTYPE total[2]={0,0};
 
@@ -150,6 +163,21 @@ class Point<uint8_t, SUMTYPE, Dim> {
     }
     for(int i=exact_dims/4; i<Dim/4; i++) {
       coords[i]=0;
+    }
+  }
+
+  __host__ uint8_t getVal(int idx) {
+    if(idx % 4 == 0) {
+      return (uint8_t)(coords[idx/4] & 0x000000FF);
+    }
+    else if(idx % 4 == 1) {
+      return (uint8_t)((coords[idx/4] & 0x0000FF00)>>8);
+    }
+    else if(idx % 4 == 2) {
+      return (uint8_t)((coords[idx/4] & 0x00FF0000)>>16);
+    }
+    else if(idx % 4 == 3) {
+      return (uint8_t)((coords[idx/4])>>24);
     }
   }
 
@@ -208,7 +236,10 @@ class Point<uint8_t, SUMTYPE, Dim> {
     return ((SUMTYPE)65536) - prod;
   }
 
+  __device__ SUMTYPE cosine(Point<uint8_t,SUMTYPE,Dim>* other, int test) {return NULL;}
+
 #else
+  __device__ SUMTYPE cosine(Point<uint8_t,SUMTYPE,Dim>* other, int test) {return NULL;}
   __device__ SUMTYPE cosine(Point<uint8_t,SUMTYPE,Dim>* other) {
     SUMTYPE prod[4];
     SUMTYPE a[4];
@@ -230,6 +261,171 @@ class Point<uint8_t, SUMTYPE, Dim> {
 
 };
 
+// Specialized version of Point structure for SIGNED 1-byte datatype (int8)
+// Packs coordinates into Dim/4 total integer values, and functions un-pack as needed
+template<typename SUMTYPE, int Dim>
+class Point<int8_t, SUMTYPE, Dim> {
+  public:
+    int id;
+    uint32_t coords[Dim/4];
+
+  __host__ void load(vector<int8_t> data) {
+
+    uint8_t* test = reinterpret_cast<uint8_t*>(data.data());
+    for(int i=0; i<Dim/4; i++) {
+      coords[i] = 0;
+      for(int j=0; j<4; j++) {
+        coords[i] += ((test[i*4 + j]) << (j*8));
+      }
+    }
+  }
+
+  __host__ void loadChunk(int8_t* data, int exact_dims) {
+
+    uint8_t* test = reinterpret_cast<uint8_t*>(data);
+    for(int i=0; i<exact_dims/4; i++) {
+      coords[i] = 0;
+      for(int j=0; j<4; j++) {
+        coords[i] += (test[i*4 + j] << (j*8));
+      }
+    }
+    for(int i=exact_dims/4; i<Dim/4; i++) {
+      coords[i]=0;
+    }
+  }
+
+  __host__ int8_t getVal(int idx) {
+    if(idx % 4 == 0) {
+      return (int8_t)(coords[idx/4] & 0x000000FF);
+    }
+    else if(idx % 4 == 1) {
+      return (int8_t)((coords[idx/4] & 0x0000FF00)>>8);
+    }
+    else if(idx % 4 == 2) {
+      return (int8_t)((coords[idx/4] & 0x00FF0000)>>16);
+    }
+    else if(idx % 4 == 3) {
+      return (int8_t)((coords[idx/4])>>24);
+    }
+  }
+
+  __host__ __device__ Point& operator=( const Point& other ) {
+    for(int i=0; i<Dim/4; i++) {
+      coords[i] = other.coords[i];
+    }
+    id = other.id;
+    return *this;
+  }
+  __device__ __host__ SUMTYPE l2_block(Point<int8_t,SUMTYPE,Dim>* other) {return 0;}
+  __device__ __host__ SUMTYPE l2(Point<int8_t,SUMTYPE,Dim>* other) {
+
+    SUMTYPE totals[4] = {0,0,0,0};
+    SUMTYPE temp[4];
+    SUMTYPE temp_other[4];
+
+    for(int i=0; i<Dim/4; ++i) {
+      temp[0] = (coords[i] & 0x000000FF);
+      temp_other[0] = (other->coords[i] & 0x000000FF);
+
+      temp[1] = (coords[i] & 0x0000FF00) >> 8;
+      temp_other[1] = (other->coords[i] & 0x0000FF00) >> 8;
+
+      temp[2] = (coords[i] & 0x00FF0000) >> 16;
+      temp_other[2] = (other->coords[i] & 0x00FF0000) >> 16;
+
+      temp[3] = (coords[i]) >> 24;
+      temp_other[3] = (other->coords[i])>> 24;
+
+      totals[0] += (temp[0]-temp_other[0])*(temp[0]-temp_other[0]);
+      totals[1] += (temp[1]-temp_other[1])*(temp[1]-temp_other[1]);
+      totals[2] += (temp[2]-temp_other[2])*(temp[2]-temp_other[2]);
+      totals[3] += (temp[3]-temp_other[3])*(temp[3]-temp_other[3]);
+    }
+    return totals[0]+totals[1]+totals[2]+totals[3];
+  }
+
+
+#if __CUDA_ARCH__ > 610  // Use intrinsics if available for GPU being compiled for
+  // With int8 datatype, values are packed into integers so they need to be
+  // unpacked while computing distance
+  __device__ SUMTYPE cosine(Point<int8_t,SUMTYPE,Dim>* other) {
+    int32_t prod=0;
+    int32_t src=0;
+    int32_t target=0;
+
+//    if(id == other->id) return 0;
+    for(int i=0; i<Dim/4; ++i) {
+      src = coords[i];
+      target = other->coords[i];
+      prod = __dp4a(src, target, prod);
+    }
+
+//    if(prod > 16384) printf("%d\n",prod);
+    return ((SUMTYPE)16384) - (SUMTYPE)prod;
+  }
+
+  __device__ SUMTYPE cosine(Point<int8_t,SUMTYPE,Dim>* other, int blah) {
+    int32_t prod=0;
+    int32_t src=0;
+    int32_t target=0;
+
+    for(int i=0; i<Dim/4; ++i) {
+      src = coords[i];
+      target = other->coords[i];
+      prod = __dp4a(src, target, prod);
+    }
+    printf("%d\n", ((SUMTYPE)1 - prod));
+
+//    if(prod > 16384) printf("%d\n",prod);
+    return ((SUMTYPE)1) - prod;
+  }
+
+
+/*
+ *   __device__ SUMTYPE cosine_unnormalized(Point<int8_t,SUMTYPE,Dim>* other) {
+ *     int32_t prod=0;
+ *     int32_t src=0;
+ *     int32_t target=0;
+ *     int32_t manual=0;
+ *     for(int i=0; i<Dim/4; ++i) {
+ *       src = coords[i];
+ *       target = other->coords[i];
+ *       prod = __dp4a(src, target, prod);
+ *       manual = ((int8_t)(coords[i] & 0x000000FF)*(int8_t)(other->coords[i] & 0x000000FF));
+ *       manual += ((int8_t)((coords[i] & 0x0000FF00) >> 8)*(int8_t)((other->coords[i] & 0x0000FF00) >> 8));
+ *       manual += ((int8_t)((coords[i] & 0x00FF0000) >> 16)*(int8_t)((other->coords[i] & 0x00FF0000) >> 16));
+ *       manual += ((int8_t)((coords[i]) >> 24)*(int8_t)((other->coords[i]) >> 24));
+ *       printf("prod:%d, manual:%d\n", prod, manual);
+ *     }
+ *     return ((SUMTYPE)65536) - prod;
+ *   }
+ */
+
+#else
+__device__ SUMTYPE cosine(Point<int8_t, SUMTYPE,Dim>* other, int test) {
+return 0;
+}
+
+  __device__ SUMTYPE cosine(Point<int8_t,SUMTYPE,Dim>* other) {
+    SUMTYPE prod[4];
+    SUMTYPE a[4];
+    SUMTYPE b[4];
+    prod[0]=0; a[0]=0; b[0]=0;
+
+    for(int i=0; i<Dim/4; ++i) {
+      prod[0] += ((int8_t)(coords[i] & 0x000000FF))*((int8_t)(other->coords[i] & 0x000000FF));
+      prod[1] = ((int8_t)((coords[i] & 0x0000FF00) >> 8))*((int8_t)((other->coords[i] & 0x0000FF00) >> 8));
+      prod[2] = ((int8_t)((coords[i] & 0x00FF0000) >> 16))*((int8_t)((other->coords[i] & 0x00FF0000) >> 16));
+      prod[3] = ((int8_t)((coords[i]) >> 24))*((int8_t)((other->coords[i]) >> 24));
+
+      prod[0] += prod[1]+prod[2]+prod[3];
+    }
+
+    return ((SUMTYPE)1) - prod[0];
+  }
+#endif
+};
+
 /*********************************************************************
  * Create an array of Point structures out of an input array
  ********************************************************************/
@@ -238,6 +434,7 @@ __host__ Point<T, SUMTYPE, Dim>* convertMatrix(T* data, int rows, int exact_dim)
   Point<T,SUMTYPE,Dim>* pointArray = (Point<T,SUMTYPE,Dim>*)malloc(rows*sizeof(Point<T,SUMTYPE,Dim>));
   for(int i=0; i<rows; i++) {
     pointArray[i].loadChunk(&data[i*exact_dim], exact_dim);
+//    pointArray[i].load(&data[i*exact_dim]);
   }
   return pointArray;
 } 

@@ -293,7 +293,6 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
     if(tptree->leaf_points[leaf_offset+i] >= min_id && tptree->leaf_points[leaf_offset+i] < max_id) {
       query = data[tptree->leaf_points[leaf_offset + i]];
 
-
       // Load results from previous iterations into shared memory heap
       // and re-compute distances since they are not stored in result set
       for(int j=0; j<KVAL; j++) {
@@ -322,7 +321,7 @@ __global__ void findRNG_strict(Point<T,SUMTYPE,Dim>* data, TPtree<T,KEY_T,SUMTYP
           }
           else if(metric == 1) {
             candidate.dist = query.cosine(&data[candidate.idx]);
-         }
+          }
 
          if(candidate.dist < max_dist){ // If it is a candidate to be added to neighbor list
 
@@ -768,7 +767,7 @@ void buildGraphGPU(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees,
  * Note, vectors of MAX_DIM number dimensions are used, so an upper-bound must be determined
  * at compile time
  ***************************************************************************************/
-template<typename DTYPE, typename SUMTYPE, int MAX_DIM>
+template<typename DTYPE, typename SUMTYPE, typename KEY_T, int MAX_DIM>
 void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int trees, int* results, int graphtype, int leafSize, int numBatches, int gpuNum) {
 
   int dim = index->GetFeatureDim();
@@ -781,11 +780,45 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
 
   int KNN_blocks; // number of threadblocks used
 
+  SUMTYPE length=0;
+
+  for(int i=0; i<10; i++) {
+    for(int j=0; j<100; j++) {
+      printf("%f,", (float)data[i*100+j]);
+    }
+    cout << endl;
+  }
+  cout << endl;
+
+
   Point<DTYPE,SUMTYPE,MAX_DIM>* points = convertMatrix<DTYPE,SUMTYPE,MAX_DIM>(data, dataSize, dim);
 
   for(int i=0;  i<dataSize; i++) {
     points[i].id = i;
   }
+
+if(typeid(DTYPE) == typeid(int8_t)) {
+  int8_t temp=0;
+  for(int i=0; i<10; i++) {
+    length=0;
+    for(int j=0; j<100; j++) {
+      temp = points[i].getVal(j);
+      printf("%hhd|", temp);
+      length+=points[i].getVal(j)*points[i].getVal(j);
+    }
+    cout << " - " << length << endl;
+  }
+  cout << endl;
+}
+else {
+  for(int i=0; i<10; i++) {
+    for(int j=0; j<100; j++) {
+      cout << points[i].getVal(j) << "|";
+    }
+    cout << endl;
+  }
+  cout << endl;
+}
 
   int batchSize = (dataSize / numBatches);
   if(batchSize * numBatches < dataSize) batchSize++;
@@ -815,13 +848,13 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
 /* Copy all input data to device, but generate portion of result set each batch */
   Point<DTYPE, SUMTYPE, MAX_DIM>* d_points;
   LOG("Alloc'ing Points on device: %ld bytes.\n", dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>));
-  CUDA_CHECK(cudaMalloc(&d_points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)));
+  CUDA_CHECK(cudaMallocManaged(&d_points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>)));
 
   CUDA_CHECK(cudaMemcpy(d_points, points, dataSize*sizeof(Point<DTYPE,SUMTYPE,MAX_DIM>), cudaMemcpyHostToDevice));
 
   LOG("Alloc'ing TPtree memory and initializing tree\n");
-  TPtree<DTYPE,KEYTYPE,SUMTYPE,MAX_DIM>* tptree;
-  CUDA_CHECK(cudaMallocManaged(&tptree, sizeof(TPtree<DTYPE,KEYTYPE,SUMTYPE, MAX_DIM>)));
+  TPtree<DTYPE,KEY_T,SUMTYPE,MAX_DIM>* tptree;
+  CUDA_CHECK(cudaMallocManaged(&tptree, sizeof(TPtree<DTYPE,KEY_T,SUMTYPE, MAX_DIM>)));
   tptree->initialize(dataSize, levels);
   KNN_blocks= max(tptree->num_leaves, BLOCKS);
 
@@ -860,8 +893,10 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
       start_t = clock();
      // Create TPT
       tptree->reset();
-      create_tptree<DTYPE, KEYTYPE, SUMTYPE,MAX_DIM>(tptree, d_points, dataSize, levels, min_id, max_id);
+      create_tptree<DTYPE, KEY_T, SUMTYPE,MAX_DIM>(tptree, d_points, dataSize, levels, min_id, max_id);
       CUDA_CHECK(cudaDeviceSynchronize());
+
+//      tptree->print_tree(d_points);
 
 // Sort each leaf by ID
 
@@ -875,7 +910,7 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
 
 
      // Compute the STRICT RNG for each leaf node
-      findRNG_strict<DTYPE, KEYTYPE, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL) * THREADS >>>(d_points, tptree, KVAL, d_results, metric, min_id, max_id);
+      findRNG_strict<DTYPE, KEY_T, SUMTYPE, MAX_DIM, THREADS><<<KNN_blocks,THREADS, sizeof(DistPair<SUMTYPE>) * (KVAL) * THREADS >>>(d_points, tptree, KVAL, d_results, metric, min_id, max_id);
    
       CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -929,6 +964,8 @@ void buildGraphGPU_Batch(SPTAG::VectorIndex* index, int dataSize, int KVAL, int 
 template<typename T>
 void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhoodSize, int trees, int* results, int refines, int refineDepth, int graph, int leafSize, int initSize, int numBatches, int gpuNum) {
 
+  std::cout << "Starting buildGraph to create RNG on the GPU" << std::endl;
+
   int m_iFeatureDim = index->GetFeatureDim();
   int m_disttype = (int)index->GetDistCalcMethod();
 
@@ -956,10 +993,10 @@ void buildGraph(SPTAG::VectorIndex* index, int m_iGraphSize, int m_iNeighborhood
 // TODO - re-introduce option to use regular KNN or loose RNG builds (without batches)
   
   if(typeid(T) == typeid(float)) {
-    buildGraphGPU_Batch<T, float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches, gpuNum);
+    buildGraphGPU_Batch<T, float, float, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches, gpuNum);
   }
   else if(typeid(T) == typeid(uint8_t) || typeid(T) == typeid(int8_t)) {
-      buildGraphGPU_Batch<T, int32_t, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches, gpuNum);
+      buildGraphGPU_Batch<T, int, int, 100>(index, m_iGraphSize, m_iNeighborhoodSize, trees, results, graph, leafSize, numBatches, gpuNum);
   }
   else {
     std::cout << "Selected datatype not currently supported." << std::endl;
